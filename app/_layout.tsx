@@ -1,29 +1,65 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useFonts } from 'expo-font';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
-
-import { useColorScheme } from '@/hooks/useColorScheme';
+import { Stack } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const [loaded] = useFonts({
-    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
-  });
-
-  if (!loaded) {
-    // Async font loading only occurs in development.
-    return null;
-  }
-
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="+not-found" />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
-  );
+	return (
+		<GestureHandlerRootView style={{ flex: 1 }}>
+			<SafeAreaProvider>
+				<Stack
+					screenOptions={{
+						headerStyle: {
+							backgroundColor: "#2c3e50",
+						},
+						headerTintColor: "#fff",
+						headerTitleStyle: {
+							fontWeight: "bold",
+						},
+						contentStyle: {
+							backgroundColor: "#ecf0f1",
+						},
+					}}
+				>
+					<Stack.Screen
+						name="index"
+						options={{
+							title: "Smart Gallery",
+							headerShown: false,
+						}}
+					/>
+					<Stack.Screen
+						name="gallery"
+						options={{
+							title: "All Photos",
+							presentation: "card",
+						}}
+					/>
+					<Stack.Screen
+						name="album/[id]"
+						options={{
+							title: "Album",
+							presentation: "card",
+						}}
+					/>
+					<Stack.Screen
+						name="photo/[id]"
+						options={{
+							title: "Photo",
+							headerShown: false,
+							presentation: "modal",
+						}}
+					/>
+					<Stack.Screen
+						name="settings"
+						options={{
+							title: "Settings",
+							presentation: "card",
+						}}
+					/>
+				</Stack>
+				<StatusBar style="inverted" />
+			</SafeAreaProvider>
+		</GestureHandlerRootView>
+	);
 }
