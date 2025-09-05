@@ -13,5 +13,9 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-, "app/gallery.jsx", "app/components/screens/GalleryScreen.jsx", "app/hooks/usePhotoStore.js"  ]
+,
+"app/gallery.jsx",
+"app/components/screens/GalleryScreen.jsx",
+"app/hooks/usePhotoStore.ts"
+]
 }

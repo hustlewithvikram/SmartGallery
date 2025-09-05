@@ -1,8 +1,8 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Link } from "expo-router";
-import { memo, useCallback } from "react";
+import { memo, useCallback, useState } from "react";
 import {
-	ActivityIndicator,
+	Dimensions,
 	FlatList,
 	Image,
 	RefreshControl,
@@ -12,9 +12,14 @@ import {
 	View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import usePhotoStore from "../../hooks/usePhotoStore";
 import usePhotos from "../../hooks/usePhotos";
 
-// Memoized photo item component for better performance
+const { width } = Dimensions.get("window");
+const COLUMN_COUNT = 3;
+const IMAGE_SIZE = (width - (COLUMN_COUNT + 1) * 2) / COLUMN_COUNT; // margin included
+
+// Memoized photo item
 const PhotoItem = memo(({ item }) => (
 	<Link
 		href={{
@@ -30,7 +35,7 @@ const PhotoItem = memo(({ item }) => (
 	>
 		<TouchableOpacity style={styles.photoItem}>
 			<Image
-				source={{ uri: item.uri }}
+				source={{ uri: item.thumbnailUri || item.uri }}
 				style={styles.photoImage}
 				resizeMode="cover"
 			/>
@@ -39,106 +44,104 @@ const PhotoItem = memo(({ item }) => (
 ));
 
 PhotoItem.displayName = "PhotoItem";
-
-// Add this function to check if items are the same
-const areItemsEqual = (prevProps, nextProps) => {
-	return prevProps.item.id === nextProps.item.id;
-};
-
-// Apply the comparison function to the memoized component
+const areItemsEqual = (prevProps, nextProps) =>
+	prevProps.item.id === nextProps.item.id;
 const MemoizedPhotoItem = memo(PhotoItem, areItemsEqual);
 
-export default function GalleryScreen() {
-	const { photos, isLoading, error, refetch } = usePhotos();
+// Skeleton placeholder
+const SkeletonItem = () => <View style={styles.skeletonItem} />;
 
-	// Use useCallback to memoize the renderItem function
+export default function GalleryScreen() {
+	const photos = usePhotoStore((s) => s.photos);
+	const setPhotos = usePhotoStore((s) => s.setPhotos);
+	const { getPhotos, isLoading, error, refetch } = usePhotos();
+
+	const [page, setPage] = useState(0);
+	const [loadingMore, setLoadingMore] = useState(false);
+
+	// Load next page with throttling
+	const loadNextPage = useCallback(async () => {
+		if (loadingMore) return;
+		setLoadingMore(true);
+		const newPhotos = await getPhotos(page + 1); // page param handled inside hook
+		if (newPhotos && newPhotos.length > 0) {
+			setPhotos([...photos, ...newPhotos]);
+			setPage((prev) => prev + 1);
+		}
+		setLoadingMore(false);
+	}, [loadingMore, page, photos, setPhotos, getPhotos]);
+
 	const renderItem = useCallback(
-		({ item }) => <MemoizedPhotoItem item={item} />,
+		({ item }) =>
+			item.id.startsWith("skeleton") ? (
+				<SkeletonItem />
+			) : (
+				<MemoizedPhotoItem item={item} />
+			),
 		[]
 	);
-
-	// Use useCallback for keyExtractor
 	const keyExtractor = useCallback((item) => item.id, []);
+	const getNumColumns = useCallback(() => COLUMN_COUNT, []);
 
-	// Get the number of columns based on screen size
-	const getNumColumns = useCallback(() => {
-		return 3; // You can make this dynamic based on screen width
-	}, []);
+	// Skeletons for initial load
+	const skeletons = Array.from({ length: 15 }).map((_, i) => ({
+		id: `skeleton-${i}`,
+	}));
 
-	if (isLoading) {
-		return (
-			<View style={styles.centerContainer}>
-				<ActivityIndicator size="large" color="#3498db" />
-				<Text style={styles.loadingText}>Loading your photos...</Text>
-			</View>
-		);
-	}
-
-	if (error) {
-		return (
-			<View style={styles.centerContainer}>
-				<Text style={styles.errorText}>Error: {error}</Text>
-				<TouchableOpacity style={styles.retryButton} onPress={refetch}>
-					<Text style={styles.retryText}>Try Again</Text>
-				</TouchableOpacity>
-			</View>
-		);
-	}
-
-	if (photos.length === 0) {
-		return (
-			<View style={styles.centerContainer}>
-				<Ionicons name="images" size={64} color="#bdc3c7" />
-				<Text style={styles.emptyText}>No photos found</Text>
-				<Text style={styles.emptySubtext}>
-					Your photos will appear here
-				</Text>
-				<TouchableOpacity style={styles.retryButton} onPress={refetch}>
-					<Text style={styles.retryText}>Refresh</Text>
-				</TouchableOpacity>
-			</View>
-		);
-	}
+	const dataToRender = isLoading && page === 0 ? skeletons : photos;
 
 	return (
 		<SafeAreaView style={styles.container}>
 			<View style={styles.header}>
-				<View
-					style={{
-						flexDirection: "row",
-						justifyContent: "space-between",
-						alignItems: "center",
-					}}
-				>
+				<View style={styles.headerRow}>
 					<Text style={styles.headerTitle}>All Photos</Text>
 					<Link href={"/settings"}>
 						<Ionicons name="settings" size={28} color="#3498db" />
 					</Link>
 				</View>
-				<Text style={styles.photoCount}>{photos.length} photos</Text>
+				<Text style={styles.photoCount}>
+					{isLoading && page === 0
+						? "Loading..."
+						: `${photos.length} photos`}
+				</Text>
 			</View>
 
+			{error && (
+				<View style={styles.centerContainer}>
+					<Text style={styles.errorText}>Error: {error}</Text>
+					<TouchableOpacity
+						style={styles.retryButton}
+						onPress={refetch}
+					>
+						<Text style={styles.retryText}>Try Again</Text>
+					</TouchableOpacity>
+				</View>
+			)}
+
 			<FlatList
-				data={photos}
+				data={dataToRender}
 				renderItem={renderItem}
 				keyExtractor={keyExtractor}
 				numColumns={getNumColumns()}
 				contentContainerStyle={styles.list}
-				initialNumToRender={10} // Render only 10 items initially
-				maxToRenderPerBatch={10} // Render 10 items at a time
-				windowSize={5} // Reduce the window size
-				removeClippedSubviews={true} // Remove items that are offscreen
+				initialNumToRender={15}
+				maxToRenderPerBatch={12}
+				windowSize={5}
+				removeClippedSubviews
 				refreshControl={
 					<RefreshControl
-						refreshing={isLoading}
+						refreshing={isLoading && page === 0}
 						onRefresh={refetch}
 						colors={["#3498db"]}
 						tintColor="#3498db"
 					/>
 				}
+				onEndReached={loadNextPage}
+				onEndReachedThreshold={0.5}
+				ListFooterComponent={loadingMore ? <SkeletonItem /> : null}
 				getItemLayout={(data, index) => ({
-					length: 100, // approximate height of your items
-					offset: 100 * index,
+					length: IMAGE_SIZE + 4, // 2px margin on each side
+					offset: index * (IMAGE_SIZE + 4),
 					index,
 				})}
 			/>
@@ -147,38 +150,29 @@ export default function GalleryScreen() {
 }
 
 const styles = StyleSheet.create({
-	container: {
-		flex: 1,
-		backgroundColor: "#fff",
-	},
+	container: { flex: 1, backgroundColor: "#fff" },
 	header: {
 		padding: 16,
 		backgroundColor: "#fff",
 		borderBottomWidth: 1,
 		borderBottomColor: "#ecf0f1",
 	},
-	headerTitle: {
-		fontSize: 24,
-		fontWeight: "bold",
-		color: "#2c3e50",
+	headerRow: {
+		flexDirection: "row",
+		justifyContent: "space-between",
+		alignItems: "center",
 	},
-	photoCount: {
-		fontSize: 14,
-		color: "#7f8c8d",
-		marginTop: 4,
-	},
-	list: {
-		padding: 2,
-	},
-	photoItem: {
-		flex: 1,
+	headerTitle: { fontSize: 24, fontWeight: "bold", color: "#2c3e50" },
+	photoCount: { fontSize: 14, color: "#7f8c8d", marginTop: 4 },
+	list: { padding: 2 },
+	photoItem: { width: IMAGE_SIZE, height: IMAGE_SIZE, margin: 2 },
+	photoImage: { width: IMAGE_SIZE, height: IMAGE_SIZE, borderRadius: 2 },
+	skeletonItem: {
+		width: IMAGE_SIZE,
+		height: IMAGE_SIZE,
 		margin: 2,
-		aspectRatio: 1,
-	},
-	photoImage: {
-		width: "100%",
-		height: "100%",
 		borderRadius: 2,
+		backgroundColor: "#e0e0e0",
 	},
 	centerContainer: {
 		flex: 1,
@@ -187,37 +181,12 @@ const styles = StyleSheet.create({
 		padding: 20,
 		backgroundColor: "#fff",
 	},
-	loadingText: {
-		marginTop: 16,
-		fontSize: 16,
-		color: "#7f8c8d",
-	},
 	errorText: {
 		fontSize: 16,
 		color: "#e74c3c",
 		textAlign: "center",
 		marginBottom: 16,
 	},
-	emptyText: {
-		fontSize: 18,
-		fontWeight: "bold",
-		color: "#2c3e50",
-		marginTop: 16,
-		marginBottom: 8,
-	},
-	emptySubtext: {
-		fontSize: 14,
-		color: "#7f8c8d",
-		textAlign: "center",
-		marginBottom: 20,
-	},
-	retryButton: {
-		padding: 12,
-		backgroundColor: "#3498db",
-		borderRadius: 8,
-	},
-	retryText: {
-		color: "#fff",
-		fontWeight: "bold",
-	},
+	retryButton: { padding: 12, backgroundColor: "#3498db", borderRadius: 8 },
+	retryText: { color: "#fff", fontWeight: "bold" },
 });

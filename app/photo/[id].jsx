@@ -19,26 +19,30 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import GestureRecognizer from "react-native-swipe-gestures";
 import usePhotoStore from "../hooks/usePhotoStore";
+import usePhotos from "../hooks/usePhotos";
 
 const { width, height } = Dimensions.get("window");
 
 export default function PhotoScreen() {
 	const { id } = useLocalSearchParams();
-	const photos = usePhotoStore((s) => s.photos); // 🔑 use cached list
+	const photos = usePhotoStore((s) => s.photos);
+	const setPhotos = usePhotoStore((s) => s.setPhotos);
+
+	const { getPhotos, hasNextPage } = usePhotos();
 
 	const [currentIndex, setCurrentIndex] = useState(0);
 	const [isZoomed, setIsZoomed] = useState(false);
 	const [showInfo, setShowInfo] = useState(false);
+	const [loadingMore, setLoadingMore] = useState(false);
 
 	// zoom refs
 	const baseScale = useRef(new Animated.Value(1)).current;
 	const pinchScale = useRef(new Animated.Value(1)).current;
 	const scale = Animated.multiply(baseScale, pinchScale);
 	const lastScale = useRef(1);
-
 	const doubleTapRef = useRef();
 
-	// find initial index
+	// Find initial index
 	useEffect(() => {
 		if (photos.length > 0 && id) {
 			const index = photos.findIndex((p) => p.id === id);
@@ -46,7 +50,21 @@ export default function PhotoScreen() {
 		}
 	}, [id, photos]);
 
-	// pinch zoom
+	// Lazy load next page if user scrolls near the end
+	const onMomentumScrollEnd = async (ev) => {
+		const index = Math.round(ev.nativeEvent.contentOffset.x / width);
+		setCurrentIndex(index);
+		resetZoom();
+
+		// If near the end and more photos exist, fetch next page
+		if (index >= photos.length - 3 && hasNextPage && !loadingMore) {
+			setLoadingMore(true);
+			const newPhotos = await getPhotos(); // fetch next batch
+			setPhotos([...photos, ...newPhotos]); // append to store
+			setLoadingMore(false);
+		}
+	};
+
 	const onPinchGestureEvent = Animated.event(
 		[{ nativeEvent: { scale: pinchScale } }],
 		{ useNativeDriver: true }
@@ -63,7 +81,6 @@ export default function PhotoScreen() {
 		}
 	};
 
-	// double tap zoom toggle
 	const onDoubleTap = (event) => {
 		if (event.nativeEvent.state === State.ACTIVE) {
 			const targetScale = isZoomed ? 1 : 2.5;
@@ -87,10 +104,13 @@ export default function PhotoScreen() {
 		setIsZoomed(false);
 	};
 
+	const safeBack = () => {
+		if (router.canGoBack()) router.back();
+		else router.replace("/");
+	};
+
 	const handleBottomSwipe = (event) => {
-		if (event === "SWIPE_DOWN") {
-			safeBack();
-		}
+		if (event === "SWIPE_DOWN") safeBack();
 	};
 
 	if (!photos || photos.length === 0) {
@@ -98,23 +118,13 @@ export default function PhotoScreen() {
 			<View style={styles.centerContainer}>
 				<Ionicons name="alert-circle" size={64} color="#fff" />
 				<Text style={styles.errorText}>No photos found</Text>
-				<TouchableOpacity
-					style={styles.backButton}
-					onPress={() => safeBack()}
-				>
+				<TouchableOpacity style={styles.backButton} onPress={safeBack}>
 					<Ionicons name="arrow-back" size={24} color="#fff" />
 					<Text style={styles.backText}>Go Back</Text>
 				</TouchableOpacity>
 			</View>
 		);
 	}
-	const safeBack = () => {
-		if (router.canGoBack()) {
-			router.back();
-		} else {
-			router.replace("/"); // fallback route
-		}
-	};
 
 	return (
 		<GestureHandlerRootView style={styles.container}>
@@ -123,7 +133,7 @@ export default function PhotoScreen() {
 				<View style={styles.topControls}>
 					<TouchableOpacity
 						style={styles.controlButton}
-						onPress={() => safeBack()}
+						onPress={safeBack}
 					>
 						<Ionicons name="arrow-back" size={24} color="#fff" />
 					</TouchableOpacity>
@@ -157,13 +167,7 @@ export default function PhotoScreen() {
 						offset: width * index,
 						index,
 					})}
-					onMomentumScrollEnd={(ev) => {
-						const index = Math.round(
-							ev.nativeEvent.contentOffset.x / width
-						);
-						setCurrentIndex(index);
-						resetZoom();
-					}}
+					onMomentumScrollEnd={onMomentumScrollEnd}
 					renderItem={({ item }) => (
 						<View
 							style={{
@@ -229,16 +233,6 @@ export default function PhotoScreen() {
 						</Text>
 					</View>
 				)}
-
-				{/* Bottom toolbar */}
-				<View style={styles.bottomControls}>
-					<TouchableOpacity style={styles.controlButton}>
-						<Ionicons name="share-outline" size={24} color="#fff" />
-					</TouchableOpacity>
-					<TouchableOpacity style={styles.controlButton}>
-						<Ionicons name="trash-outline" size={24} color="#fff" />
-					</TouchableOpacity>
-				</View>
 			</SafeAreaView>
 		</GestureHandlerRootView>
 	);
@@ -268,11 +262,14 @@ const styles = StyleSheet.create({
 	},
 	backText: { color: "#fff", marginLeft: 10 },
 	topControls: {
+		position: "absolute",
+		top: 50,
+		right: 0,
+		left: 0,
 		flexDirection: "row",
 		justifyContent: "space-between",
 		alignItems: "center",
 		paddingHorizontal: 20,
-		paddingTop: 10,
 		zIndex: 10,
 	},
 	bottomControls: {
