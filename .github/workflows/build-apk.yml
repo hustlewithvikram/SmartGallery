@@ -1,0 +1,59 @@
+name: Build & Release APK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo & EAS (auth)
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install jq (for parsing JSON)
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Build release APK (EAS)
+        run: |
+          echo "🚀 Starting EAS build..."
+          eas build -p android --profile production --non-interactive --json > build.json
+          cat build.json
+
+          DOWNLOAD_URL=$(jq -r '.[0].artifacts.buildUrl' build.json)
+          if [ "$DOWNLOAD_URL" == "null" ] || [ -z "$DOWNLOAD_URL" ]; then
+            echo "❌ Failed to fetch APK download URL"
+            cat build.json
+            exit 1
+          fi
+
+          echo "✅ Download URL: $DOWNLOAD_URL"
+          curl -L "$DOWNLOAD_URL" -o app-release.apk
+
+      - name: Create GitHub Release & upload APK
+        uses: softprops/action-gh-release@v1
+        with:
+          files: app-release.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
